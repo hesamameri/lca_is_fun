@@ -8,15 +8,9 @@ connection_string = st.secrets['mongo']['uri']
 client = MongoClient(connection_string)
 db = client['LCA']
 collection = db['test']
-connection_string = st.secrets['mongo']['uri']
-client = MongoClient(connection_string)
 
-if st.button('Test Connection'):
-    try:
-        client.admin.command('ping')
-        st.success("Successfully connected to MongoDB!")
-    except Exception as e:
-        st.error(f"Connection failed: {e}")
+
+
 # Session ID Management
 if 'session_id' not in st.query_params:
     session_id = str(uuid.uuid4())
@@ -138,7 +132,7 @@ if user_data['lca_data']['data']:
             st.rerun()
 
 # Display MongoDB Data for Verification in a Table
-st.subheader("Current MongoDB Data")
+st.subheader("Your Data")
 
 # Prepare data for the table
 table_data = []
