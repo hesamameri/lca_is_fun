@@ -8,7 +8,15 @@ connection_string = st.secrets['mongo']['uri']
 client = MongoClient(connection_string)
 db = client['LCA']
 collection = db['test']
+connection_string = st.secrets['mongo']['uri']
+client = MongoClient(connection_string)
 
+if st.button('Test Connection'):
+    try:
+        client.admin.command('ping')
+        st.success("Successfully connected to MongoDB!")
+    except Exception as e:
+        st.error(f"Connection failed: {e}")
 # Session ID Management
 if 'session_id' not in st.query_params:
     session_id = str(uuid.uuid4())
