@@ -79,9 +79,9 @@ with st.sidebar:
 
     st.write("### Inputs")
     for i, input in enumerate(st.session_state.current_stage["inputs"]):
-        input["Y1"] = st.text_input(f"Input Name {i+1}", input.get("Y1", ""))
-        input["functional_unit"] = st.text_input(f"Functional Unit {i+1}", input.get("functional_unit", ""))
-        input["quantity"] = st.number_input(f"Quantity {i+1}", value=input.get("quantity", 0.0))
+        input["Y1"] = st.text_input(f"Input Name {i+1}", input.get("Y1", ""), key=f"input_name_{i}")
+        input["functional_unit"] = st.text_input(f"Functional Unit {i+1}", input.get("functional_unit", ""), key=f"input_unit_{i}")
+        input["quantity"] = st.number_input(f"Quantity {i+1}", value=input.get("quantity", 0.0), key=f"input_quantity_{i}")
         if st.button(f"Delete Input {i+1}", key=f"delete_input_{i}"):
             st.session_state.current_stage["inputs"].pop(i)
             st.rerun()
@@ -90,9 +90,9 @@ with st.sidebar:
 
     st.write("### Outputs")
     for i, output in enumerate(st.session_state.current_stage["outputs"]):
-        output["name"] = st.text_input(f"Output Name {i+1}", output.get("name", ""))
-        output["functional_unit"] = st.text_input(f"Functional Unit {i+1}", output.get("functional_unit", ""))
-        output["quantity"] = st.number_input(f"Quantity {i+1}", value=output.get("quantity", 0.0))
+        output["name"] = st.text_input(f"Output Name {i+1}", output.get("name", ""), key=f"output_name_{i}")
+        output["functional_unit"] = st.text_input(f"Functional Unit {i+1}", output.get("functional_unit", ""), key=f"output_unit_{i}")
+        output["quantity"] = st.number_input(f"Quantity {i+1}", value=output.get("quantity", 0.0), key=f"output_quantity_{i}")
         if st.button(f"Delete Output {i+1}", key=f"delete_output_{i}"):
             st.session_state.current_stage["outputs"].pop(i)
             st.rerun()
