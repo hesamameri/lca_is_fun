@@ -3,13 +3,13 @@ import pandas as pd
 import uuid
 from pymongo import MongoClient
 from streamlit import secrets
+import io
+
 # MongoDB connection (keep your credentials secure)
 connection_string = st.secrets['mongo']['uri']
 client = MongoClient(connection_string)
 db = client['LCA']
 collection = db['test']
-
-
 
 # Session ID Management
 if 'session_id' not in st.query_params:
@@ -45,6 +45,33 @@ def update_mongo_data(data):
         {"$set": {"lca_data.data": data}}, 
         upsert=True
     )
+
+# Function to calculate LCA impacts with linked inputs and outputs
+def calculate_lca_impacts(data):
+    # Dictionary to store total impacts by impact name
+    total_impacts = {}
+
+    for stage_name, stage_data in data.items():
+        for input_item in stage_data.get('inputs', []):
+            for impact in input_item.get('impacts', []):
+                impact_name = impact['name']
+                impact_factor = impact['quantity']  # impact factor per unit of input
+                input_quantity = input_item['quantity']
+                
+                impact_contribution = input_quantity * impact_factor
+                
+                if impact_name not in total_impacts:
+                    total_impacts[impact_name] = {
+                        'total': impact_contribution,
+                        'unit': impact['functional_unit']
+                    }
+                else:
+                    if total_impacts[impact_name]['unit'] == impact['functional_unit']:
+                        total_impacts[impact_name]['total'] += impact_contribution
+                    else:
+                        st.error(f"Unit mismatch for impact '{impact_name}'. Expected {total_impacts[impact_name]['unit']}, got {impact['functional_unit']}.")
+
+    return total_impacts
 
 # UI Styling
 st.markdown("""
@@ -82,80 +109,121 @@ with st.sidebar:
         input["Y1"] = st.text_input(f"Input Name {i+1}", input.get("Y1", ""), key=f"input_name_{i}")
         input["functional_unit"] = st.text_input(f"Functional Unit {i+1}", input.get("functional_unit", ""), key=f"input_unit_{i}")
         input["quantity"] = st.number_input(f"Quantity {i+1}", value=input.get("quantity", 0.0), key=f"input_quantity_{i}")
+        
+        # Use an expander to group impacts for each input
+        with st.expander(f"Impacts for {input['Y1']}"):
+            if 'impacts' not in input:
+                input['impacts'] = []
+            
+            for j, impact in enumerate(input['impacts']):
+                # Use session state to store and update impact data
+                impact['name'] = st.text_input(f"Impact Name {j+1}", impact.get('name', ""), key=f"impact_name_{i}_{j}")
+                impact['quantity'] = st.number_input(f"Impact Factor {j+1}", value=impact.get('quantity', 0.0), key=f"impact_factor_{i}_{j}")
+                impact['functional_unit'] = st.text_input(f"Impact Unit {j+1}", impact.get('functional_unit', ""), key=f"impact_unit_{i}_{j}")
+                
+                if st.button(f"Delete Impact {j+1}", key=f"delete_impact_{i}_{j}"):
+                    input['impacts'].pop(j)
+                    # Clear this impact from session_state to avoid key conflicts
+                    for key in st.session_state.keys():
+                        if key.startswith(f"impact_{i}_{j}"):
+                            del st.session_state[key]
+                    st.rerun()  # Only rerun to update UI after deletion
+                    break  # Break to avoid index shifting issues
+
+            # Add new impact without causing rerun
+            if st.button(f"Add New Impact", key=f"add_new_impact_{i}"):
+                input['impacts'].append({
+                    'name': "",
+                    'quantity': 0.0,
+                    'functional_unit': ""
+                })
+                st.rerun()  # Only rerun to update UI after adding new impact
+        
         if st.button(f"Delete Input {i+1}", key=f"delete_input_{i}"):
             st.session_state.current_stage["inputs"].pop(i)
-            st.rerun()
-    if st.button("Add New Input"):
-        st.session_state.current_stage["inputs"].append({"Y1": "", "functional_unit": "", "quantity": 0.0})
+            st.rerun()  # Only rerun after deletion
 
-    st.write("### Outputs")
-    for i, output in enumerate(st.session_state.current_stage["outputs"]):
-        output["name"] = st.text_input(f"Output Name {i+1}", output.get("name", ""), key=f"output_name_{i}")
-        output["functional_unit"] = st.text_input(f"Functional Unit {i+1}", output.get("functional_unit", ""), key=f"output_unit_{i}")
-        output["quantity"] = st.number_input(f"Quantity {i+1}", value=output.get("quantity", 0.0), key=f"output_quantity_{i}")
-        if st.button(f"Delete Output {i+1}", key=f"delete_output_{i}"):
-            st.session_state.current_stage["outputs"].pop(i)
-            st.rerun()
-    if st.button("Add New Output"):
-        st.session_state.current_stage["outputs"].append({"name": "", "functional_unit": "", "quantity": 0.0})
+    if st.button("Add New Input"):
+        st.session_state.current_stage["inputs"].append({"Y1": "", "functional_unit": "", "quantity": 0.0, "impacts": []})
+        st.rerun()  # Only rerun after adding new input
 
     if st.button("Save Stage"):
         if st.session_state.current_stage["life_cycle_stage"]:
             stage_name = st.session_state.current_stage["life_cycle_stage"]
-            user_data['lca_data']['data'][stage_name] = st.session_state.current_stage
-            update_mongo_data(user_data['lca_data']['data'])
-            st.session_state.current_stage = {"life_cycle_stage": "", "inputs": [], "outputs": []}
-            st.success("Stage saved to LCA")
-            st.rerun()
+            clean_inputs = [inp for inp in st.session_state.current_stage["inputs"] if all(inp.values()) and inp['impacts']]
+            
+            if clean_inputs:  # Only save if there's at least one valid input with impacts
+                user_data['lca_data']['data'][stage_name] = {
+                    "life_cycle_stage": stage_name,
+                    "inputs": clean_inputs,
+                }
+                update_mongo_data(user_data['lca_data']['data'])
+                st.session_state.current_stage = {"life_cycle_stage": "", "inputs": [], "outputs": []}
+                st.success("Stage saved to LCA")
+            else:
+                st.error("No valid inputs with impacts to save. Please fill in all fields including impacts.")
+            st.rerun()  # Rerun to update UI after saving
 
-# Main Content - Display Data from MongoDB
-if user_data['lca_data']['data']:
-    for stage_name, stage_data in list(user_data['lca_data']['data'].items()):  # Use list() to avoid runtime error during iteration
-        st.subheader(f"Life Cycle Stage: {stage_name}")
-        st.write("**Inputs:**")
+if not user_data['lca_data']['data']:
+    st.title("Welcome to LCA Fun!")
+    st.write("Get started by adding your life cycle stages, inputs, and impacts.")
+else:
+    # Main Content - Display Data from MongoDB
+    if user_data['lca_data']['data']:
+        for stage_name, stage_data in list(user_data['lca_data']['data'].items()):  
+            st.subheader(f"Life Cycle Stage: {stage_name}")
+            st.write("**Inputs:**")
+            for input in stage_data['inputs']:
+                st.write(f"- **{input['Y1']}:** Functional Unit: {input['functional_unit']}, Quantity: {input['quantity']}")
+                for impact in input.get('impacts', []):
+                    st.write(f"    - Impact: {impact['name']}, Factor: {impact['quantity']} per {input['functional_unit']}, Unit: {impact['functional_unit']}")
+
+    # Display MongoDB Data for Verification in a Table
+    st.subheader("Your Data")
+
+    # Prepare data for the table
+    table_data = []
+    for stage_name, stage_data in user_data['lca_data']['data'].items():
         for input in stage_data['inputs']:
-            st.write(f"- **{input['Y1']}:** Functional Unit: {input['functional_unit']}, Quantity: {input['quantity']}")
-        st.write("**Outputs:**")
-        for output in stage_data['outputs']:
-            st.write(f"- **{output['name']}:** Functional Unit: {output['functional_unit']}, Quantity: {output['quantity']}")
+            for impact in input.get('impacts', []):
+                table_data.append({
+                    'Stage': stage_name,
+                    'Input': input['Y1'],
+                    'Impact': impact['name'],
+                    'Functional Unit': input['functional_unit'],
+                    'Quantity': input['quantity'],
+                    'Impact Factor': impact['quantity'],
+                    'Impact Unit': impact['functional_unit']
+                })
+
+    # Convert the list of dictionaries to a DataFrame
+    df = pd.DataFrame(table_data)
+
+    # Display the DataFrame as a table
+    st.table(df)
+
+    # Download Button for Excel
+    if not df.empty:
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df.to_excel(writer, index=False, sheet_name='LCA Data')
+        output.seek(0)
+
+        st.download_button(
+            label="Download LCA Data as Excel",
+            data=output,
+            file_name='lca_data.xlsx',
+            mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
+
+    # Button to trigger LCA calculation
+    if st.button("Calculate Life Cycle Assessment"):
+        impacts = calculate_lca_impacts(user_data['lca_data']['data'])
         
-        col1, col2 = st.columns(2)
-        if col1.button(f"Edit {stage_name}", key=f"edit_{stage_name}"):
-            st.session_state.current_stage = stage_data
-            st.session_state.current_stage["life_cycle_stage"] = stage_name
-            st.rerun()
+        st.subheader("Life Cycle Assessment Results")
+        for impact_name, impact_data in impacts.items():
+            st.write(f"**{impact_name}:** {impact_data['total']:.2f} {impact_data['unit']}")
         
-        if col2.button(f"Delete {stage_name}", key=f"delete_{stage_name}"):
-            del user_data['lca_data']['data'][stage_name]
-            update_mongo_data(user_data['lca_data']['data'])
-            st.success(f"Stage '{stage_name}' deleted")
-            st.rerun()
-
-# Display MongoDB Data for Verification in a Table
-st.subheader("Your Data")
-
-# Prepare data for the table
-table_data = []
-for stage_name, stage_data in user_data['lca_data']['data'].items():
-    for input in stage_data['inputs']:
-        table_data.append({
-            'Stage': stage_name,
-            'Type': 'Input',
-            'Name': input['Y1'],
-            'Functional Unit': input['functional_unit'],
-            'Quantity': input['quantity']
-        })
-    for output in stage_data['outputs']:
-        table_data.append({
-            'Stage': stage_name,
-            'Type': 'Output',
-            'Name': output['name'],
-            'Functional Unit': output['functional_unit'],
-            'Quantity': output['quantity']
-        })
-
-# Convert the list of dictionaries to a DataFrame
-df = pd.DataFrame(table_data)
-
-# Display the DataFrame as a table
-st.table(df)
+        # Create a DataFrame for visualization
+        impacts_df = pd.DataFrame.from_dict(impacts, orient='index', columns=['Total Impact', 'Unit'])
+        st.table(impacts_df)
