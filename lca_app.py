@@ -2,9 +2,10 @@ import streamlit as st
 import pandas as pd
 import uuid
 from pymongo import MongoClient
-
+from streamlit import secrets
 # MongoDB connection (keep your credentials secure)
-client = MongoClient('mongodb+srv://hesam7991ameri:Iwilwpm13760901@course-management.5wg8r.mongodb.net/?retryWrites=true&w=majority&appName=course-management')
+connection_string = st.secrets['mongo']['uri']
+client = MongoClient(connection_string)
 db = client['LCA']
 collection = db['test']
 
